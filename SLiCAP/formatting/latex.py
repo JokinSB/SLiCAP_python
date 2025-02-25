@@ -66,16 +66,16 @@ class LaTeXFormatter(BaseFormatter):
 
     @_autosave
     def netlist(self, netlistFile, lineRange=None, firstNumber=None):
-        return sl.netlist2TEX(netlistFile, lineRange=None, firstNumber=None)
+        return sl.netlist2TEX(netlistFile, lineRange, firstNumber)
 
     @_autosave
     def specs(self, specs, specType, label='', caption=''):
-        return sl.specs2TEX(specs, specType, label='', caption='')
+        return sl.specs2TEX(specs, specType, label, caption)
 
     @_autosave
     def elementData(self, circuitObject, label='', append2caption=''):
-        return sl.elementData2TEX(circuitObject, label='', append2caption='')
+        return sl.elementData2TEX(circuitObject, label, append2caption)
 
     @_autosave
     def eqn(self, LHS, RHS, units='', label='', multiline=0):
-        return sl.eqn2TEX(LHS, RHS, units='', label='', multiline=0)
+        return sl.eqn2TEX(LHS, RHS, units, label, multiline)
