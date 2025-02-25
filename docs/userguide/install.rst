@@ -54,7 +54,7 @@ SLiCAP has symbol libraries for creating circuit diagrams with:
 - `gSchem for windows: gEDA-20130122.zip <https://analog-electronics.tudelft.nl/downloads/gEDA-20130122.zip>`_
 - `Lepton EDA <https://github.com/lepton-eda/lepton-eda>`_
 
-For these packages, SLiCAP also has build in netlist generation. SLiCAP uses `Inkscape <https://inkscape.org/>`_ for scaling of KiCAD images from page format to drawing format. For detaied information see `Schematic capture <schematics.html>`_.
+For these packages, SLiCAP also has build in netlist generation. SLiCAP uses python scripts for scaling of KiCAD images from page format to drawing format. For detaied information see `Schematic capture <schematics.html>`_.
 
 SLiCAP also interacts with `NGspice <https://ngspice.sourceforge.io/>`_ for performing more elaborate numeric simulations.
  
@@ -75,6 +75,17 @@ Updating of the main configuration file is recommended if:
 #. During installation under MS-Windows, searching to the apps listed above timed out
 
 In these cases the commands (under MS-Windows the locatation of the executables) need to be set in the *command* section.
+    
+Below an example of the command section for user "USER" under MS-Windows with default installation of all apps (lepton-eda is not available under MS-Windows). The main configuration file is located at: C:\\Users\\USER\\SLiCAP\\SLiCAP.ini:
+
+.. code-block:: python
+
+    [commands]
+    lepton-eda = 
+    kicad = C:\Program Files\KiCad\8.0\bin\kicad-cli.exe
+    ltspice = C:\Program Files\LTC\LTspiceXVII\XVIIx64.exe
+    geda = C:\Program Files (x86)\gEDA\gEDA\bin\gnetlist.exe
+    ngspice = C:\Users\anton\ngspice\Spice64\bin\ngspice.exe
 
 Below an example of the command section for user "USER" under Linux with default installation of LTspice under *wine*. The main configuration file is located at: /home/USER/SLiCAP/SLiCAP.ini:
 
@@ -82,23 +93,10 @@ Below an example of the command section for user "USER" under Linux with default
 
     [commands]
     ltspice = /home/USER/.wine/drive_c/Program Files/ADI/LTspice/LTspice.exe
-    inkscape = inkscape
     kicad = kicad-cli
     geda = lepton-netlist
     lepton-eda = lepton-cli
     ngspice = ngspice
-    
-Below an example of the command section for user "USER" under MS-Windows with default installation of all apps (lepton-eda is not available under MS-Windows). The main configuration file is located at: C:\Users\USER\SLiCAP\SLiCAP.ini:
-
-.. code-block:: python
-
-    [commands]
-    lepton-eda = 
-    inkscape = C:\Program Files\Inkscape\bin\inkscape.exe
-    kicad = C:\Program Files\KiCad\8.0\bin\kicad-cli.exe
-    ltspice = C:\Program Files\LTC\LTspiceXVII\XVIIx64.exe
-    geda = C:\Program Files (x86)\gEDA\gEDA\bin\gnetlist.exe
-    ngspice = C:\Users\anton\ngspice\Spice64\bin\ngspice.exe
 
 Project configuration
 =====================
@@ -129,22 +127,21 @@ The default execution result of the command sl.ini.dump() after initialization o
 .. code-block:: python
 
     >>> import SLiCAP as sl
-    >>> prj = sl.initProject("My First RC network")
+    >>> sl.initProject("My First RC network")
     
     Compiling library: SLiCAP.lib.
     Compiling library: SLiCAPmodels.lib.
     
     >>> sl.dump()
     
-    ini.install_version = 3.0.1
-    ini.latest_version  = 3.0.1
+    ini.install_version = 3.2.4
+    ini.latest_version  = 3.2.4
     ini.install_path    = C:/Users/USER/anaconda3/lib/site-packages/
     ini.home_path       = C:/Users/USER/SLiCAP/
     ini.main_lib_path   = C:/Users/USER/SLiCAP/lib/
     ini.example_path    = C:/Users/USER/SLiCAP/examples/
     ini.doc_path        = C:/Users/USER/SLiCAP/docs/
     ini.ltspice         = C:\Program Files\LTC\LTspiceXVII\XVIIx64.exe
-    ini.inkscape        = C:\Program Files\Inkscape\bin\inkscape.exe
     ini.gnetlist        = C:\Program Files (x86)\gEDA\gEDA\bin\gnetlist.exe
     ini.kicad           = C:\Program Files\KiCad\8.0\bin\kicad-cli.exe
     ini.ngspice         = C:\Users\USER\ngspice\Spice64\bin\ngspice.exe
@@ -165,9 +162,9 @@ The default execution result of the command sl.ini.dump() after initialization o
     ini.html_pages      = ['']
     ini.html_labels     = <Section: labels>
     ini.disp            = 4
-    ini.last_updated    = 2024-11-03 22:11:36
+    ini.last_updated    = 2025-02-03 16:15:03
     ini.project_title   = My first RC network
-    ini.created         = 2024-11-03 21:55:14
+    ini.created         = 2025-01-31 05:01:58
     ini.author          = USER
     ini.laplace         = s
     ini.frequency       = f
@@ -177,6 +174,8 @@ The default execution result of the command sl.ini.dump() after initialization o
     ini.step_function   = True
     ini.factor          = True
     ini.max_rec_subst   = 15
+    ini.reduce_matrix   = True
+    ini.reduce_circuit  = True
     ini.hz              = True
     ini.gain_colors     = {'asymptotic': 'r', 'gain': 'b', 'loopgain': 'k', 'servo': 'm', 'direct': 'g', 'vi': 'c'}
     ini.plot_fontsize   = 10
@@ -185,12 +184,13 @@ The default execution result of the command sl.ini.dump() after initialization o
     ini.legend_loc      = best
     ini.default_colors  = ['r', 'b', 'g', 'c', 'm', 'y', 'k']
     ini.default_markers = ['']
+    ini.svg_margin      = 1
     ini.plot_fontsize   = 10
     ini.plot_file_type  = svg
     ini.gain_types      = ['gain', 'asymptotic', 'loopgain', 'servo', 'direct', 'vi']
     ini.data_types      = ['dc', 'dcvar', 'dcsolve', 'laplace', 'numer', 'denom', 'solve', 'noise', 'pz', 'poles', 'zeros', 'time', 'impulse', 'step']
     ini.sim_types       = ['symbolic', ' numeric']
-    ini.notebook        =  False
+    ini.notebook        = False
     
 Changing settings
 -----------------
@@ -199,10 +199,15 @@ It is strongly advised not to change any settings in the project SLiCAP.ini file
 
 .. code-block:: python
 
-   >>> ini.disp          = 3     # set the number of significant digits in reports and listings to 3
-   >>> ini.hz            = False # set the default frequency units to *rad/s*
-   >>> ini.max_rec_subst = 20    # set the maximum number of recursive substitution of expressions to 20
-   
+   >>> import SLiCAP as sl
+   >>> sl.ini.disp            = 3     # set the number of significant digits in reports and listings to 3
+   >>> sl.ini.hz              = False # set the default frequency units to *rad/s*
+   >>> sl.ini.max_rec_subst   = 20    # set the maximum number of recursive substitutions in expressions to 20
+   >>> sl.ini.reduce_circuit  = False # Do NOT eliminate unused independent voltage sources from the circuit
+   >>> sl.ini.reduce_matrix   = False # Do NOT eliminate variables and reduce the matrix size before calculating the determinant
+                                      # If True, the size of MNA matrices comprising Laplace expressions will be reduced through
+                                      # elimination of variables, until all matrix enties are either zero or Laplace polynomials
+                                      # of the first order or higher
 Test the installation
 =====================
 

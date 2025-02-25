@@ -132,9 +132,8 @@ def initProject(name, notebook=False):
     ini.last_updated                          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     project_config['project']['last_updated'] = ini.last_updated
     
-    # Update the configuration file
-    ini._write_project_config(project_config)
-    
+    # Update configuration files
+    ini.main_config, ini.project_config = ini._update_ini_files()
     # Create the project directory structure, at the first run of initProject()
     _makeDir(ini.html_path)
     _makeDir(ini.txt_path)
@@ -172,6 +171,5 @@ def initProject(name, notebook=False):
     if not ini.notebook:
         # Create the HTML project index file
         _startHTML(name)
-    # Initialize the parser, this will create the libraries and delete all
-    # previously defined circuits
+    # Initialize the parser, this will create the libraries and delete all previously defined circuits
     _initializeParser()

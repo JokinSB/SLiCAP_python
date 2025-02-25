@@ -11,7 +11,6 @@ from numpy.polynomial import Polynomial
 from scipy.integrate import quad
 from scipy.optimize import fsolve
 from SLiCAP.SLiCAPlex import _replaceScaleFactors
-from SLiCAP.SLiCAPfc import computeFC
 
 def det(M, method="ME"):
     """
@@ -34,32 +33,84 @@ def det(M, method="ME"):
     :return: Determinant of 'M'
     :rtype:  sympy.Expr
     """
-    if isinstance(M, sp.Matrix):
-        if M.shape[0] != M.shape[1]:
-            print("ERROR: Cannot determine determinant of non-square matrix.")
-            D = None
-        dim = M.shape[0]
-        if dim == 1:
-            D = M[0,0]
-        elif dim == 2:
-            D = sp.expand(M[0,0]*M[1,1]-M[1,0]*M[0,1])
-        elif method == "ME":
-            D = _detME(M)
-        elif method == "BS":
-            D = _detBS(M)
-        elif method == "LU":
-            D = M.det(method="LU")
-        elif method == "bareiss":
-            D = M.det(method="bareiss")
-        elif method == "FC":
-            D = _detFC(M)
-        else:
-            print("ERROR: Unknown method for det(M).")
-            D = None
-    else:
-        print("Error: det(M) requires a sympy square matrix as input.")
+    M = sp.Matrix(M) # Be sure to have an Mutable Matrix
+    if M.shape[0] != M.shape[1]:
+        print("ERROR: Cannot determine determinant of non-square matrix.")
         D = None
-    return sp.collect(D, sp.Symbol("s"))
+    if ini.reduce_matrix and ini.laplace in M.atoms(sp.Symbol):
+        M, factor = _eliminateVars(M)
+    else:
+        factor = 1
+    dim = M.shape[0]
+    if M.is_zero_matrix:
+        D = factor
+    elif dim == 1:
+        D = M[0,0]*factor
+    elif dim == 2:
+        D = sp.expand(M[0,0]*M[1,1]-M[1,0]*M[0,1])*factor
+    elif method == "ME":
+        D = _detME(M)*factor
+    elif method == "BS":
+        D = _detBS(M)*factor
+    elif method == "LU":
+        D = M.det(method="LU")*factor
+    elif method == "bareiss":
+        D = M.det(method="bareiss")*factor
+    elif method == "laplace":
+        D = M.det(method="laplace")*factor
+    else:
+        print("ERROR: Unknown method for det(M).")
+        D = None
+    return D
+
+def _eliminateVars(M):
+    """
+    Reduces the size of a matrix through elimination of variables. The method
+    guarantees a division-free operation for Laplace terms in the matrix.
+    """
+    k, l   = _find_nonLaplaceEntry(M)
+    factor = 1 # Scaling factor for determinant, if no laplace variable is used
+               # factor will equal the determinant
+    dim    = M.shape[0]
+    while k >= 0:
+        dim        = M.shape[0]
+        M_cpy      = M.copy()
+        # exchange row k with row 0 and column l with column 0
+        if k != 0:
+            M_cpy[0,:] = M.row(k)
+            M_cpy[k,:] = M.row(0)
+            factor *= -1
+        if l != 0:
+            col_0      = M_cpy.col(0)
+            col_l      = M_cpy.col(l)
+            M_cpy[:,0] = col_l
+            M_cpy[:,l] = col_0
+            factor *= -1
+        factor     = sp.simplify(M_cpy[0,0]*factor)
+        for i in range(1, dim):
+            for j in range(1, dim):
+                # Substitute the variable
+                M_cpy[i,j] = sp.expand(M_cpy[i,j] - M_cpy[i,0]*M_cpy[0,j]/M_cpy[0,0])
+        # Remove row 0 and column 0
+        M     = M_cpy.minor_submatrix(0,0)
+        k, l  = _find_nonLaplaceEntry(M)
+    return M, sp.simplify(factor)
+
+def _find_nonLaplaceEntry(M):
+    """
+    Returns the (row, col) position of the first nonzero entry in the matrix
+    which is not a Laplace expression.
+    """
+    dim   = M.shape[0]
+    for i in range(dim):
+        row = M.row(i)
+        # First check variable at pos i = j makes it considerably faster
+        if row[i] !=0 and ini.laplace not in row[i].atoms(sp.Symbol):
+            return i, i
+        for j in range(dim):
+            if row[j] != 0 and ini.laplace not in row[j].atoms(sp.Symbol):
+                return i, j
+    return -1, -1
 
 def _detME(M):
     dim = M.shape[0]
@@ -69,18 +120,15 @@ def _detME(M):
         D = 0
         for row in range(dim):
             if M[row,0] != 0:
-                newM = M.copy()
-                newM.row_del(row)
-                newM.col_del(0)
-                minor = _detME(newM)
+                minor = _detME(M.minor_submatrix(row, 0))
                 if minor != 0:
-                    D += M[row,0] * (-1)**(row%2) * minor
+                    D += M[row,0] * (-1)**row * minor
     return sp.expand(D)
 
 def _detBS(M):
     newM = M.copy()
     sign = 1
-    dim  = M.shape[0]
+    dim  = newM.shape[0]
     for k in range(dim-1):
         if newM[k,k] == 0:
             for m in range(k+1, dim):
@@ -97,12 +145,7 @@ def _detBS(M):
                 if k:
                     newM[i,j] = sp.factor(newM[i,j] / newM[k-1, k-1])
     D = sign * newM[dim-1, dim-1]
-    return D
-
-def _detFC(M):
-    fc = computeFC(M)
-    D = det(sp.Matrix(sp.eye(fc.shape[0])*ini.laplace + fc), method='BS')
-    return D
+    return sp.simplify(D)
 
 def _Roots(expr, var):
     if isinstance(expr, sp.Basic) and isinstance(var, sp.Symbol):
@@ -1400,8 +1443,8 @@ def roundN(expr, numeric=False):
         maxInt = 10**ini.disp
         floats = expr.atoms(sp.Float)
         for flt in floats:
-            intNumber = sp.Integer(flt)
-            if intNumber == flt and sp.Abs(flt) < maxInt:
+            intNumber = int(flt)
+            if float(intNumber) == float(flt) and sp.Abs(flt) < maxInt:
                 expr = expr.xreplace({flt: intNumber})
         # Replace large integers with floats
         ints = expr.atoms(sp.Integer)
@@ -1679,6 +1722,128 @@ def listPZ(pzResult):
     print('\n')
     return
 
+def _integrate_all_coeffs(poly, x, x_lower, x_upper, doit=True):
+    
+    results = {}
+    terms = zip(poly.coeffs(), poly.monoms())
+    for coeff, (exp_1, exp_2) in terms:
+        coeff = sp.factor(coeff)
+        if doit and (len(coeff.atoms(sp.Symbol)) == 0 or coeff.atoms(sp.Symbol) == {x}):
+            coeff_func = sp.lambdify(x, coeff)
+            integral, error = quad(coeff_func, x_lower, x_upper)
+        else:
+            try:
+                if doit:
+                    integral = sp.integrate(coeff, (x, x_lower, x_upper))
+                else: 
+                    integral = sp.Integral(coeff, (x, x_lower, x_upper))
+            except:
+                raise NotImplementedError()
+        results[(exp_1, exp_2)] = integral
+    return results
+
+def _integrateCoeffs2(func, variables, x, x_lower, x_upper, doit=True):
+
+    # Find the highest order terms in the denominator
+    numer, denom = func.as_numer_denom()
+    poly_denom = sp.Poly(denom, variables[0], variables[1])
+
+    max_degree = poly_denom.total_degree()
+    for exponents in poly_denom.monoms():
+        if sum(exponents) == max_degree:
+            var0_order, var1_order = exponents
+
+    # Change the order to use sp.Poly
+    poly =  sp.Poly(sp.simplify(func * variables[0]**var0_order * variables[1]**var1_order), variables[0], variables[1])
+
+    # Integrate the polynomial coefficients numerically
+    integratedCoeffs = _integrate_all_coeffs(poly, x, x_lower, x_upper, doit=doit)
+    return integratedCoeffs, exponents
+    
+def integrated_monomial_coeffs(expr, variables, x, x_lower, x_upper, doit=True):
+    """
+    Returns a dictionary with key-value pairs:
+    
+    - key: monomial of variables
+    - coefficient of this monomial with x integrated over the range 
+      x_lower ... x_upper. 
+      
+    If doit=True the integration will be performed, else integral operators 
+    will be returned.
+    
+    :param expr: Sympy expression
+    :type param: sympy.expr
+    
+    :param variables: List or tuple with variables  
+                      (currently only two variables accepted)
+                      
+    :type variables: list with sympy.Symbol objects
+
+    :param x: integration variable
+    :type x: sympy.Symbol
+    
+    :param x_lower: start value integration
+    :type x_lower: sympy.Symbol, int or float
+    
+    :param x_upper: end value integration
+    :type x_upper: sympy.Symbol, int or float
+    
+    :param doit: True/False; If True, the integration will be performed, 
+                 else integral operators will be returned.
+    :type doit: bool
+    
+    :return: Integration result
+    :rtype: sympy.expr, int or float
+    """ 
+    
+    if len(variables) == 2:
+        integrated_coeffs, orders = _integrateCoeffs2(expr, variables, x, x_lower, x_upper, doit=doit)
+    else:
+        raise NotImplementedError("Only two-variable monomials are implemented.") 
+    new_coeffs = {}
+    for key in integrated_coeffs.keys():
+        newkey = variables[0]**(key[0]-orders[0]) * variables[1]**(key[1]-orders[1])
+        new_coeffs[newkey] = integrated_coeffs[key]
+    return new_coeffs
+
+def integrate_monomial_coeffs(expr, variables, x, x_lower, x_upper, doit=True):
+    """
+    Returns expr in which x in coefficients of monomials of 
+    variables is integrated over the range x_lower ... x_upper. If doit=True
+    the integration will be performed, else integral operators will be returned.
+    
+    :param expr: Sympy expression
+    :type param: sympy.expr
+    
+    :param variables: List or tuple with variables
+                      (currently only two variables accepted)
+                      
+    :type variables: list with sympy.Symbol objects
+
+    :param x: integration variable
+    :type x: sympy.Symbol
+    
+    :param x_lower: start value integration
+    :type x_lower: sympy.Symbol, int or float
+    
+    :param x_upper: end value integration
+    :type x_upper: sympy.Symbol, int or float
+    
+    :param doit: True/False; If True, the integration will be performed, 
+                 else integral operators will be returned.
+    :type doit: bool
+    
+    :return: Integration result
+    :rtype: sympy.expr, int or float
+    """ 
+    integratedCoeffs = integrated_monomial_coeffs(expr, variables, x, x_lower, x_upper, doit=doit)
+    # Reconstruct the integrated polynomial
+    #integratedResult = sum(coeff * variables[0]**exp[0] * variables[1]**exp[1]
+    #                    for exp, coeff in integratedCoeffs.items())
+    integratedResult = sum(sp.Mul(key, integratedCoeffs[key], evaluate=doit)
+                        for key in integratedCoeffs.keys())
+    return integratedResult
+
 if __name__ == "__main__":
     from time import time
     ini.hz=True
@@ -1774,3 +1939,9 @@ if __name__ == "__main__":
     loopgain         = sp.sympify('100/(1+s/1000/2/pi)')
     print(findServoBandwidth(loopgain))
     """
+    expr= sp.sympify("4*Gamma*T*k*n*(C_i + C_s + c_iss)**2/(C_i**2*g_m) + K_F*(C_i + C_s)**2/(C_OX*C_i**2*c_iss*f**A_F)")
+    g_m, c_iss =  sp.symbols("g_m, c_iss")
+    variables = (g_m, c_iss)
+    f, f_min, f_max = sp.symbols("f, f_min, f_max")
+    integratedCoeffs = integrated_monomial_coeffs(expr, variables, f, f_min, f_max, doit=False)
+    result = integrate_monomial_coeffs(expr, variables, f, f_min, f_max, doit=False)
