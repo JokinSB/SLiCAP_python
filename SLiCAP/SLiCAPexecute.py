@@ -4,10 +4,11 @@
 SLiCAP scripts for execution of an instruction.
 """
 import sympy as sp
+from copy import deepcopy
 import SLiCAP.SLiCAPconfigure as ini
 from SLiCAP.SLiCAPyacc import _updateCirData
 from SLiCAP.SLiCAPprotos import element, allResults
-from SLiCAP.SLiCAPmatrices import _makeMatrices, _makeSrcVector
+from SLiCAP.SLiCAPmatrices import _makeMatrices, _makeSrcVector, _reduceCircuit
 from SLiCAP.SLiCAPmath import float2rational, normalizeRational, det, _Roots 
 from SLiCAP.SLiCAPmath import _cancelPZ, _zeroValue, ilt, assumeRealParams
 from SLiCAP.SLiCAPmath import  clearAssumptions, fullSubs
@@ -61,10 +62,8 @@ def _createResultObject(instr):
     result.substitute     = instr.substitute
     result.label          = instr.label
     result.parDefs        = None
-    if instr.parDefs != None:
-        result.parDefs = {}
-        for key in list(instr.parDefs.keys()):
-            result.parDefs[key] = instr.parDefs[key]
+    if not instr.ignoreCircuitParams:
+        result.parDefs = deepcopy(instr.circuit.parDefs)
     return result
 
 def _doInstruction(instr):
@@ -81,8 +80,8 @@ def _doInstruction(instr):
     :rtype: SLiCAPprotos.allResults()
     """
     if instr.errors == 0:
+        instr = _makeInstrParDict(instr)
         result = _createResultObject(instr)
-        instr = _makeSubsDict(instr)
         if instr.lgRef != None:
             oldLGrefElements = []
             for i in range(len(instr.lgRef)):
@@ -442,14 +441,14 @@ def _doDCvar(instr, result):
     if instr.step:
         print("Warning: parameter stepping not (yet) tested for 'dcvar' analysis!")
         if ini.step_function:
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, reduce=False)
             instr.dataType = 'dcsolve'
             result.dataType = 'dcsolve'
             result = _doDCsolve(instr, result)
             instr.dataType = 'dcvar'
             result.dataType = 'dcvar'
             _addDCvarSources(instr, result.dcSolve[0])
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, reduce=False)
             varResult = _doPyDCvar(instr, result)
             result.ovar = _stepFunctions(instr.stepDict, varResult.ovar[0])
             result.ivar = _stepFunctions(instr.stepDict, varResult.ivar[0])
@@ -472,7 +471,7 @@ def _doDCvar(instr, result):
                 result = _doPyDCvar(instr, result)
                 _delDCvarSources(instr)
     else:
-        result = _makeAllMatrices(instr, result)
+        result = _makeAllMatrices(instr, result, reduce=False)
         instr.dataType = 'dcsolve'
         result.dataType = 'dcsolve'
         result = _doDCsolve(instr, result)
@@ -731,13 +730,13 @@ def _doDC(instr, result):
     if instr.step:
         if ini.step_function:
             if instr.gainType == 'loopgain' or instr.gainType == 'servo':
-                result = _makeAllMatrices(instr, result)
+                result = _makeAllMatrices(instr, result, inductors=True)
                 result.Iv = result.Iv.subs(ini.laplace, 0)
                 result.M = result.M.subs(ini.laplace, 0)
                 result = _doPyLoopGainServo(instr, result)
                 dcFunc = result.laplace[0]
             else:
-                result = _makeAllMatrices(instr, result)
+                result = _makeAllMatrices(instr, result, inductors=True)
                 result.Iv = result.Iv.subs(ini.laplace, 0)
                 result.M = result.M.subs(ini.laplace, 0)
                 result = _doPyLaplace(instr, result)
@@ -750,23 +749,23 @@ def _doDC(instr, result):
                 for j in range(len(stepVars)):
                     instr.parDefs[stepVars[j]] = instr.stepDict[stepVars[j]][i]
                 if instr.gainType == 'loopgain' or instr.gainType == 'servo':
-                    result = _makeAllMatrices(instr, result)
+                    result = _makeAllMatrices(instr, result, inductors=True)
                     result.Iv = result.Iv.subs(ini.laplace, 0)
                     result.M = result.M.subs(ini.laplace, 0)
                     result = _doPyLoopGainServo(instr, result)
                 else:
-                    result = _makeAllMatrices(instr, result)
+                    result = _makeAllMatrices(instr, result, inductors=True)
                     result.Iv = result.Iv.subs(ini.laplace, 0)
                     result.M = result.M.subs(ini.laplace, 0)
                     result = _doPyLaplace(instr, result)
     else:
         if instr.gainType == 'loopgain' or instr.gainType == 'servo':
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, inductors=True)
             result.Iv = result.Iv.subs(ini.laplace, 0)
             result.M = result.M.subs(ini.laplace, 0)
             result = _doPyLoopGainServo(instr, result)
         else:
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, inductors=True)
             result.Iv = result.Iv.subs(ini.laplace, 0)
             result.M = result.M.subs(ini.laplace, 0)
             result = _doPyLaplace(instr, result)
@@ -891,7 +890,7 @@ def _doSolve(instr, result):
     """
     if instr.step:
         if ini.step_function:
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, reduce=False)
             sol = _doPySolve(instr, result).solve[0]
             result.solve = _stepFunctions(instr.stepDict, sol)
         else:
@@ -900,10 +899,10 @@ def _doSolve(instr, result):
             for i in range(numSteps):
                 for j in range(len(stepVars)):
                     instr.parDefs[stepVars[j]]=instr.stepDict[stepVars[j]][i]
-                result = _makeAllMatrices(instr, result)
+                result = _makeAllMatrices(instr, result, reduce=False)
                 result = _doPySolve(instr, result)
     else:
-        result = _makeAllMatrices(instr, result)
+        result = _makeAllMatrices(instr, result, reduce=False)
         result.solve = _doPySolve(instr, result).solve[0]
     return result
 
@@ -926,7 +925,7 @@ def _doDCsolve(instr, result):
     """
     if instr.step:
         if ini.step_function:
-            result = _makeAllMatrices(instr, result)
+            result = _makeAllMatrices(instr, result, reduce=False)
             result.M = result.M.subs(ini.laplace, 0)
             result.Iv = result.Iv.subs(ini.laplace, 0)
             result = _doPySolve(instr, result)
@@ -938,13 +937,13 @@ def _doDCsolve(instr, result):
             for i in range(numSteps):
                 for j in range(len(stepVars)):
                     instr.parDefs[stepVars[j]]=instr.stepDict[stepVars[j]][i]
-                result = _makeAllMatrices(instr, result)
+                result = _makeAllMatrices(instr, result, reduce=False)
                 result.M = result.M.subs(ini.laplace, 0)
                 result.Iv = result.Iv.subs(ini.laplace, 0)
                 result = _doPySolve(instr, result)
                 result.dcSolve.append(sp.simplify(result.solve[-1]))
     else:
-        result = _makeAllMatrices(instr, result)
+        result = _makeAllMatrices(instr, result, reduce=False)
         result.M = result.M.subs(ini.laplace, 0)
         result.Iv = result.Iv.subs(ini.laplace, 0)
         result = _doPySolve(instr, result)
@@ -1016,7 +1015,7 @@ def _doMatrix(instr, result):
     result = _makeAllMatrices(instr, result)
     return result
 
-def _makeAllMatrices(instr, result):
+def _makeAllMatrices(instr, result, reduce=True, inductors=False):
     """
     Returns an allResults() object of which the following attributes have been
     updated:
@@ -1043,6 +1042,8 @@ def _makeAllMatrices(instr, result):
     Iv = [0 for i in range(result.M.shape[0])]
     result.Iv = sp.Matrix(Iv)
     transferTypes = ['gain', 'asymptotic', 'direct']
+    
+    # Create the source vector for the instruction
     if instr.gainType == 'vi':
         if instr.dataType == "noise" or instr.dataType == "dcvar":
             result.Iv = _makeSrcVector(instr.circuit, instr.parDefs, 'all', value = 'id', numeric = instr.numeric, substitute=instr.substitute)
@@ -1050,7 +1051,7 @@ def _makeAllMatrices(instr, result):
             result.Iv = _makeSrcVector(instr.circuit, instr.parDefs, 'all', value = 'dc', numeric = instr.numeric, substitute=instr.substitute)
         else:
             result.Iv = _makeSrcVector(instr.circuit, instr.parDefs, 'all', value = 'value', numeric = instr.numeric, substitute=instr.substitute)
-    elif instr.gainType in transferTypes:
+    elif instr.gainType in transferTypes and instr.source != None:
         if instr.source != [None, None]:
             if instr.source[0] == None or instr.source[1] == None:
                 ns = 1
@@ -1084,6 +1085,7 @@ def _makeAllMatrices(instr, result):
                     else:
                         # differential input
                         result.Iv[pos] = ((-1)**i)/ns
+    # Apply conversion type
     if instr.convType != None:
         # Adapt instr.ParDefs for balancing
         if instr.removePairSubName:
@@ -1098,8 +1100,11 @@ def _makeAllMatrices(instr, result):
         detector, errors = _checkDetector(result.detector, list(result.Dv.transpose()))
         result.detector = detector
         instr.circuit.errors += errors
+    # Reduce the circuit
+    if ini.reduce_circuit and reduce:
+        result.M, result.Iv, result.Dv = _reduceCircuit(result, inductors=inductors)
     return result
-
+    
 def _checkDetector(detector, detectors):
     """
     Check if the detector exists, this must be done after matrix conversion
@@ -1112,7 +1117,7 @@ def _checkDetector(detector, detectors):
             errors +=1
     return detector, errors
     
-def _makeSubsDict(instr):
+def _makeInstrParDict(instr):
     """
     Creates a substitution dictionary that does not contain the step parameters
     for the instruction.
@@ -1124,13 +1129,18 @@ def _makeSubsDict(instr):
     :rtype: :class`SLiCAPinstruction.instruction)`
     """
     if instr.substitute and ini.step_function and instr.step:
-        instr.parDefs = {}
-        for key in list(instr.circuit.parDefs.keys()):
-            if key not in list(instr.stepDict.keys()):
-                instr.parDefs[key] = instr.circuit.parDefs[key]
-    else:
-        instr.parDefs = instr.circuit.parDefs
-        
+        parDefs = {}
+        if not instr.ignoreCircuitParams:
+            for key in list(instr.circuit.parDefs.keys()):
+                if key not in list(instr.stepDict.keys()):
+                    parDefs[key] = instr.circuit.parDefs[key]
+        else:
+            for key in list(instr.parDefs.keys()):
+                if key not in list(instr.stepDict.keys()):
+                    parDefs[key] = instr.circuit.parDefs[key]
+        instr.parDefs = parDefs
+    elif not instr.ignoreCircuitParams:
+        instr.parDefs = deepcopy(instr.circuit.parDefs)
     return instr
 
 def _stepFunctions(stepDict, function):
@@ -1536,14 +1546,14 @@ def _doPyLoopGainServo(instr, result):
         num, den = SVnum, SVden
         SV = num/den
         result.laplace.append(SV)
-    #num, den = result.laplace[-1].as_numer_denom()
     result.numer.append(num)
     result.denom.append(den)
     return result
 
 def _doPyNoise(instr, result):
     """
-    Attribute numer rewriten or appended?! Check with stepping.
+    Optimization of the matrix has been implemented. This speeds up with
+    multiple independent voltage noise sources.
     """
     s2f = 2*sp.pi*sp.I*sp.Symbol('f', positive=True)
     if instr.numeric == True:
@@ -1557,22 +1567,30 @@ def _doPyNoise(instr, result):
                 value = float2rational(sp.N(value))
             result.snoiseTerms[name] = value
     result = _makeAllMatrices(instr, result)
-    Iv_noise = result.Iv
-    den = assumeRealParams(_doPyDenom(result).denom[0].subs(ini.laplace, s2f))
+    den = _doPyDenom(result)
+    den = assumeRealParams(den.denom[0].subs(ini.laplace, s2f))
     den_sq = sp.Abs(den * sp.conjugate(den))
     if instr.source != [None, None] and instr.source != None:
         instr.gainType = 'gain'
         result.gainType = 'gain'
-        result = _makeAllMatrices(instr, result)
+        result = _makeAllMatrices(instr, result)     
         result = _doPyNumer(instr, result)
         num = assumeRealParams(result.numer[-1].subs(ini.laplace, s2f))
         if num != None:
             sl_num_sq = sp.Abs(num * sp.conjugate(num))
-        instr.gainType = 'vi'
-        result.gainType = 'vi'
+    instr.gainType = 'vi'
+    result.gainType = 'vi'
+    instr.dataType = 'noise'
+    result = _makeAllMatrices(instr, result, reduce=False)
+    M_noise = result.M
+    Iv_noise = result.Iv
+    Dv_noise = result.Dv
     onoise = 0
     inoise = 0
     for src in result.snoiseTerms.keys():
+        result.M = M_noise
+        result.Iv = Iv_noise
+        result.Dv = Dv_noise
         if src not in result.onoiseTerms.keys():
             result.onoiseTerms[src] = []
             result.inoiseTerms[src] = []
@@ -1584,6 +1602,9 @@ def _doPyNoise(instr, result):
             else:
                 Iv = Iv.subs(name, 0)
         result.Iv = Iv
+        result.source = [src]
+        # Remove unused independent voltage sources
+        result.M, result.Iv, result.Dv = _reduceCircuit(result)
         result = _doPyNumer(instr, result)
         num = assumeRealParams(result.numer[-1].subs(ini.laplace, s2f))
         if num != None:
@@ -1595,10 +1616,10 @@ def _doPyNoise(instr, result):
             result.onoiseTerms[src].append(clearAssumptions(onoiseTerm))
             onoise += result.onoiseTerms[src][-1]
             if instr.source != [None, None] and instr.source != None:
-                inoiseTerm = result.snoiseTerms[src]*num_sq/sl_num_sq
+                inoiseTerm = clearAssumptions(result.snoiseTerms[src]*num_sq/sl_num_sq)
                 if ini.factor:
                     inoiseTerm = sp.factor(inoiseTerm)
-                result.inoiseTerms[src].append(clearAssumptions(inoiseTerm))
+                result.inoiseTerms[src].append(inoiseTerm)
                 inoise += result.inoiseTerms[src][-1]
     result.onoise.append(onoise)
     if inoise == 0:
@@ -1619,15 +1640,14 @@ def _doPyDCvar(instr, result):
             if instr.numeric == True:
                 value = float2rational(sp.N(value))
             result.svarTerms[name] = value
-    result = _makeAllMatrices(instr, result)
+    result = _makeAllMatrices(instr, result, inductors=True)
     result.M = result.M.subs(ini.laplace, 0)
-    Iv_var = result.Iv.subs(ini.laplace, 0)
     den = _doPyDenom(result).denom[0]
     den_sq = den**2
     if instr.source != [None, None] and instr.source != None:
         instr.gainType = 'gain'
         result.gainType = 'gain'
-        result = _makeAllMatrices(instr, result)
+        result = _makeAllMatrices(instr, result, inductors=True)
         Iv_gain = result.Iv.subs(ini.laplace, 0)
         result.M = result.M.subs(ini.laplace, 0)
         result.Iv = Iv_gain
@@ -1635,11 +1655,19 @@ def _doPyDCvar(instr, result):
         num = result.numer[-1]
         if num != None:
             sl_num_sq = num**2
-        instr.gainType = 'vi'
-        result.gainType = 'vi'
+    instr.gainType  = 'vi'
+    result.gainType = 'vi'
+    result.dataType = 'dcvar'
+    result = _makeAllMatrices(instr, result, reduce=False)
+    M_var = result.M.subs(ini.laplace, 0)
+    Iv_var = result.Iv.subs(ini.laplace, 0)
+    Dv_var = result.Dv
     ovar = 0
     ivar = 0
     for src in result.svarTerms.keys():
+        result.M = M_var
+        result.Iv = Iv_var
+        result.Dv = Dv_var
         if src not in result.ovarTerms.keys():
             result.ovarTerms[src] = []
             result.ivarTerms[src] = []
@@ -1651,6 +1679,8 @@ def _doPyDCvar(instr, result):
             else:
                 Iv = Iv.subs(name, 0)
         result.Iv = Iv
+        result.source = [src]
+        result.M, result.Iv, result.Dv = _reduceCircuit(result)
         result = _doPyNumer(instr, result)
         num = result.numer[-1]
         if num != None:
